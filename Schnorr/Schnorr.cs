@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -96,6 +97,54 @@ namespace Schnorrek
             return hashBigInt == s1;
         }
 
+        public BigInteger[] PodpiszPlik(string sciezkaPliku)
+        {
+            if (!File.Exists(sciezkaPliku))
+                throw new FileNotFoundException("Plik nie istnieje", sciezkaPliku);
+
+            byte[] fileBytes = File.ReadAllBytes(sciezkaPliku);
+
+            do
+            {
+                r = GenerateRandomBigInteger(158);
+            } while (r < 0 || r > q - 1);
+
+            BigInteger x = BigInteger.ModPow(h, r, p);
+            byte[] xBytes = x.ToByteArray();
+
+            byte[] combined = new byte[fileBytes.Length + xBytes.Length];
+            Buffer.BlockCopy(fileBytes, 0, combined, 0, fileBytes.Length);
+            Buffer.BlockCopy(xBytes, 0, combined, fileBytes.Length, xBytes.Length);
+
+            byte[] hash = sha256.ComputeHash(combined);
+            BigInteger S1 = new BigInteger(hash, isUnsigned: true, isBigEndian: false);
+
+            BigInteger S2 = (r + a * S1) % q;
+
+            return new BigInteger[] { S1, S2 };
+        }
+
+        public bool WeryfikujPlik(string sciezkaPliku, BigInteger s1, BigInteger s2)
+        {
+            if (!File.Exists(sciezkaPliku))
+                throw new FileNotFoundException("Plik nie istnieje", sciezkaPliku);
+
+            byte[] fileBytes = File.ReadAllBytes(sciezkaPliku);
+
+            BigInteger Z = (BigInteger.ModPow(h, s2, p) * BigInteger.ModPow(v, s1, p)) % p;
+            byte[] ZBytes = Z.ToByteArray();
+
+            byte[] combined = new byte[fileBytes.Length + ZBytes.Length];
+            Buffer.BlockCopy(fileBytes, 0, combined, 0, fileBytes.Length);
+            Buffer.BlockCopy(ZBytes, 0, combined, fileBytes.Length, ZBytes.Length);
+
+            byte[] hash = sha256.ComputeHash(combined);
+            BigInteger hashBigInt = new BigInteger(hash, isUnsigned: true, isBigEndian: false);
+
+            return hashBigInt == s1;
+        }
+
+
         private BigInteger GeneratePrime(int bits)
         {
             while (true)
@@ -111,49 +160,44 @@ namespace Schnorrek
             int bytes = bits / 8;
             byte[] data = new byte[bytes + 1];
             random.NextBytes(data);
-            data[data.Length - 1] = 0; // aby liczba była nieujemna
+            data[data.Length - 1] = 0;
             return new BigInteger(data);
         }
 
-        public bool IsProbablyPrime(BigInteger value, int witnesses = 10)
+        public Boolean IsProbablyPrime(BigInteger value, int witnesses = 10)
         {
             if (value <= 1)
                 return false;
-            if (value == 2 || value == 3)
-                return true;
-            if (value.IsEven)
-                return false;
 
-            // Dekompozycja: value - 1 = 2^s * d
+            if (witnesses <= 0)
+                witnesses = 10;
+
             BigInteger d = value - 1;
             int s = 0;
-            while ((d & 1) == 0)
+
+            while (d % 2 == 0)
             {
-                d >>= 1;
-                s++;
+                d /= 2;
+                s += 1;
             }
 
-            // Bufor do losowania (wydajniejsze niż nowe byte[] co iterację)
-            int byteLength = value.GetByteCount();
-            byte[] buffer = new byte[byteLength];
-
-            using var rng = RandomNumberGenerator.Create();
+            Byte[] bytes = new Byte[value.ToByteArray().LongLength];
+            BigInteger a;
 
             for (int i = 0; i < witnesses; i++)
             {
-                BigInteger a;
                 do
                 {
-                    rng.GetBytes(buffer);
-                    buffer[^1] &= 0x7F; // zapewnij, że liczba będzie dodatnia
-                    a = new BigInteger(buffer);
-                } while (a < 2 || a >= value - 2);
+                    random.NextBytes(bytes);
+
+                    a = new BigInteger(bytes);
+                }
+                while (a < 2 || a >= value - 2);
 
                 BigInteger x = BigInteger.ModPow(a, d, value);
                 if (x == 1 || x == value - 1)
                     continue;
 
-                bool found = false;
                 for (int r = 1; r < s; r++)
                 {
                     x = BigInteger.ModPow(x, 2, value);
@@ -161,34 +205,14 @@ namespace Schnorrek
                     if (x == 1)
                         return false;
                     if (x == value - 1)
-                    {
-                        found = true;
                         break;
-                    }
                 }
 
-                if (!found)
+                if (x != value - 1)
                     return false;
             }
 
             return true;
-        }
-
-
-
-        private BigInteger GenerateRandomBigIntegerInRange(BigInteger min, BigInteger max)
-        {
-            BigInteger diff = max - min;
-            int bytes = diff.ToByteArray().Length;
-            byte[] data = new byte[bytes];
-            BigInteger result;
-            do
-            {
-                random.NextBytes(data);
-                data[data.Length - 1] &= 0x7F; //bez ujemniaków
-                result = new BigInteger(data);
-            } while (result > diff || result < 0);
-            return result + min;
         }
 
         private BigInteger ModInverse(BigInteger a, BigInteger modulus)
@@ -216,6 +240,39 @@ namespace Schnorrek
                 x1 += m0;
 
             return x1;
+        }
+
+        public static string BigIntegerToHex(BigInteger value)
+        {
+            byte[] bytes = value.ToByteArray();
+            Array.Reverse(bytes);
+            return string.Join("", bytes.Select(b => b.ToString("x2")));
+        }
+
+        public static BigInteger HexToBigInteger(string hexString)
+        {
+            if (string.IsNullOrEmpty(hexString))
+            {
+                return BigInteger.Zero;
+            }
+            if (hexString.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                hexString = hexString.Substring(2);
+            }
+
+            if (hexString.Length % 2 != 0)
+            {
+                hexString = "0" + hexString;
+            }
+
+            byte[] bytes = new byte[hexString.Length / 2];
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = Convert.ToByte(hexString.Substring(i * 2, 2), 16);
+            }
+
+            Array.Reverse(bytes);
+            return new BigInteger(bytes);
         }
     }
 }

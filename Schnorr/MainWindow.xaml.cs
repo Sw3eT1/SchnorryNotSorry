@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Numerics;
 using System.Security.Cryptography;
+using Microsoft.Win32;
+using System.IO;
 using System.Text;
 using System.Windows;
 
@@ -21,9 +23,9 @@ namespace Schnorrek
             //try
             //{
                 schnorr.GenerateKey();
-                tBoxP.Text = schnorr.p.ToString();
-                tBoxQ.Text = schnorr.q.ToString();
-                tBoxH.Text = schnorr.h.ToString();
+                tBoxP.Text = Schnorr.BigIntegerToHex(schnorr.p);
+                tBoxQ.Text = Schnorr.BigIntegerToHex(schnorr.q);
+                tBoxH.Text = Schnorr.BigIntegerToHex(schnorr.h);
                 tBoxA.Text = schnorr.a.ToString();
                 tBoxLog.Text = "Parametry p, q, h oraz a wygenerowane.";
             //}
@@ -44,8 +46,8 @@ namespace Schnorrek
                 tBoxA.Text = privateKey.ToString();
 
                 // Wyświetl hashe kluczy
-                tBoxPrivate.Text = GetSha512Hex(privateKey.ToString());
-                tBoxPublic.Text = GetSha512Hex(publicKey.ToString());
+                tBoxPrivate.Text = Schnorr.BigIntegerToHex(privateKey);
+                tBoxPublic.Text = Schnorr.BigIntegerToHex(publicKey);
 
                 tBoxLog.Text = "Klucze wygenerowane i zahashowane SHA-512.";
             }
@@ -68,13 +70,71 @@ namespace Schnorrek
                 }
 
                 BigInteger[] signature = schnorr.podpisuj(message);
-                tBoxE.Text = signature[0].ToString();
-                tBoxY.Text = signature[1].ToString();
+                tBoxE.Text = Schnorr.BigIntegerToHex(signature[0]);
+                tBoxY.Text = Schnorr.BigIntegerToHex(signature[1]);
                 tBoxLog.Text = "Wiadomość podpisana.";
             }
             catch (Exception ex)
             {
                 tBoxLog.Text = "Błąd podpisywania: " + ex.Message;
+            }
+        }
+
+        private void bSignFile_Click(object sender, RoutedEventArgs e)
+        {
+            var openFileDialog = new OpenFileDialog();
+            if (openFileDialog.ShowDialog() == true)
+            {
+                try
+                {
+                    BigInteger[] signature = schnorr.PodpiszPlik(openFileDialog.FileName);
+                    string sigFile = openFileDialog.FileName + ".sig";
+
+                    
+
+                    File.WriteAllText(sigFile, Schnorr.BigIntegerToHex(signature[0]) + "\n" + Schnorr.BigIntegerToHex(signature[1]));
+                    tBoxLog.Text = $"Plik podpisany. Podpis zapisany w: {sigFile}";
+                }
+                catch (Exception ex)
+                {
+                    tBoxLog.Text = "Błąd podpisywania pliku: " + ex.Message;
+                }
+            }
+        }
+
+        private void bVerifyFile_Click(object sender, RoutedEventArgs e)
+        {
+            var openFileDialog = new OpenFileDialog();
+            if (openFileDialog.ShowDialog() == true)
+            {
+                string filePath = openFileDialog.FileName;
+                string sigPath = filePath.Replace(".sig","");
+
+                if (!File.Exists(sigPath))
+                {
+                    tBoxLog.Text = "Brak pliku z podpisem (.sig).";
+                    return;
+                }
+
+                try
+                {
+                    string[] sigParts = File.ReadAllLines(filePath);
+                    if (sigParts.Length < 2)
+                    {
+                        tBoxLog.Text = "Plik z podpisem jest nieprawidłowy.";
+                        return;
+                    }
+
+                    BigInteger s1 = Schnorr.HexToBigInteger(sigParts[0]);
+                    BigInteger s2 = Schnorr.HexToBigInteger(sigParts[1]);
+
+                    bool result = schnorr.WeryfikujPlik(sigPath, s1, s2);
+                    tBoxLog.Text = result ? "Podpis pliku jest poprawny." : "Podpis pliku jest NIEpoprawny.";
+                }
+                catch (Exception ex)
+                {
+                    tBoxLog.Text = "Błąd podczas weryfikacji podpisu: " + ex.Message;
+                }
             }
         }
 
@@ -94,9 +154,8 @@ namespace Schnorrek
                     tBoxLog.Text = "Podpis (e, y) jest pusty.";
                     return;
                 }
-
-                BigInteger s1 = BigInteger.Parse(tBoxE.Text);
-                BigInteger s2 = BigInteger.Parse(tBoxY.Text);
+                BigInteger s1 = Schnorr.HexToBigInteger(tBoxE.Text);
+                BigInteger s2 = Schnorr.HexToBigInteger(tBoxY.Text);
 
                 bool valid = schnorr.weryfikujString(message, $"{s1}\n{s2}");
                 tBoxLog.Text = valid ? "Podpis jest poprawny." : "Podpis jest NIEpoprawny.";
