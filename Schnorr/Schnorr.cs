@@ -27,10 +27,10 @@ namespace Schnorrek
 
         public void GenerateKey()
         {
-            q = GeneratePrime(140);
+            q = GenerateRandomBigInteger(140);
             do
             {
-                p = GeneratePrime(512);
+                p = GenerateRandomBigInteger(512);
                 var pMinus1 = p - 1;
                 p = p - (pMinus1 % q);
             } while (!IsProbablyPrime(p, 2));
